@@ -317,11 +317,12 @@ final class QuickNoteModel: ObservableObject {
         scope = "slots"
     }
 
-    func settings(expiry: Int? = nil, fontSize: Double? = nil, lined: Bool? = nil) {
+    func settings(expiry: Int? = nil, fontSize: Double? = nil, lined: Bool? = nil, mathColor: MathResultColor? = nil) {
         guard ready else { return }
         if let expiry { library.expiryDays = expiry; library.expire(); ensureSelection(); analyze() }
         if let fontSize { library.fontSize = min(28, max(11, fontSize)) }
         if let lined { library.linedPaper = lined }
+        if let mathColor { library.mathResultColor = mathColor }
         changed()
     }
 
@@ -386,6 +387,12 @@ final class QuickNoteModel: ObservableObject {
     func copyDraft() {
         guard let selectedID else { return }
         copyNote(selectedID)
+    }
+    /// Native result Copy already wrote the clipboard; AutoPaste must not feed
+    /// that result back into this note as external capture.
+    func didCopyResult(_ text: String) {
+        ownCopy = text
+        pasteboardChange = pasteboard.changeCount
     }
     func copyNote(_ id: String) {
         guard let text = library.notes.first(where: { $0.id == id })?.content else { return }

@@ -90,6 +90,17 @@ private struct PopupNoteView: View {
                 .keyboardShortcut("n", modifiers: .command).disabled(!model.ready)
             Menu {
                 Button("Math Reference…") { model.mathReference.show(model: model) }
+                Menu("Math Result Color") {
+                    ForEach(MathResultColor.allCases, id: \.self) { color in
+                        Button {
+                            model.settings(mathColor: color)
+                        } label: {
+                            if (model.library.mathResultColor ?? .automatic) == color {
+                                Label(color.title, systemImage: "checkmark")
+                            } else { Text(color.title) }
+                        }
+                    }
+                }.disabled(!model.ready)
                 Menu("Math 108X Examples") {
                     ForEach(CourseMathExamples.all, id: \.title) { example in
                         Button(example.title) { model.startNewNote(content: example.content) }
@@ -220,7 +231,8 @@ private struct PopupNoteView: View {
                     InlineNoteEditor(text: model.draft, textColor: model.editorTextColor, autoFocus: true,
                                      onEdit: model.inlineEdited, onSave: model.saveCurrent,
                                      fontSize: model.library.fontSize, focusToken: model.focusToken,
-                                     analysis: model.analysis,
+                                     analysis: model.analysis, resultColor: model.library.mathResultColor ?? .automatic,
+                                     onResultCopy: model.didCopyResult,
                                      onCommand: model.command, onShortcut: model.perform(shortcut:), onNavigate: model.navigate, onEscape: model.escape,
                                      onImage: { model.recognizeImage($0) }, onImageFile: { model.recognizeFile($0) },
                                      onOpenURL: { model.context?.open($0) })
@@ -319,7 +331,7 @@ struct LinedPaper: View {
 }
 
 /// Stack / Slots / Void switcher in the widget's own colors, with counts.
-private struct ScopeTabs: View {
+struct ScopeTabs: View {
     @ObservedObject var model: QuickNoteModel
     let primary: Color
     let secondary: Color
@@ -341,20 +353,18 @@ private struct ScopeTabs: View {
                 Button {
                     withAnimation(.snappy(duration: 0.22)) { model.scope = tab.id }
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: selected ? tab.symbol + ".fill" : tab.symbol)
-                            .font(.system(size: 10, weight: .semibold))
+                    HStack(spacing: 3) {
                         Text(tab.title).font(.system(size: 11, weight: selected ? .semibold : .medium))
+                            .minimumScaleFactor(0.8)
                         if tab.count > 0 {
-                            Text("\(tab.count)")
+                            Text(tab.count > 999 ? "999+" : "\(tab.count)")
                                 .font(.system(size: 9, weight: .semibold, design: .rounded)).monospacedDigit()
-                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .padding(.horizontal, 3).padding(.vertical, 1)
                                 .background(primary.opacity(selected ? 0.16 : 0.08), in: Capsule())
                         }
                     }
                     .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 3)
                     .foregroundStyle(selected ? primary : secondary)
                     .frame(maxWidth: .infinity, minHeight: 26)
                     .background {
@@ -370,6 +380,7 @@ private struct ScopeTabs: View {
                 .buttonStyle(.plain)
                 .help(tab.id == "void" ? "Deleted notes you can restore" : tab.id == "slots" ? "Notes kept in permanent slots" : "Your scratch notes, newest first")
                 .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityLabel("\(tab.title), \(tab.count) notes")
             }
         }
         .padding(3)

@@ -73,6 +73,8 @@ The plugin retains one model across compact, inline and popup controllers. AppKi
 
 This is a Dock widget, not Antinote binary compatibility. Vehla owns window placement, activation and shortcuts. Separate application windows, global extension hotkeys, iCloud sync, Antinote's JavaScript marketplace, Vim editing, split-screen editing, live currency rates and PDF export are outside this implementation. All exposed controls perform real operations.
 
+Math answers are read-only selectable text: highlight a result and press ⌘C to copy it. **More → Math Result Color** saves a color choice for the widget and every pop-out editor. Stack/Slots/Void tabs fit within the sidebar, including larger note counts.
+
 ## Build and install
 
 macOS 14+, Apple silicon, Swift 6+ with the full Xcode developer tools selected:
