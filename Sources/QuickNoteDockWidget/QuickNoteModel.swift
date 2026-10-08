@@ -14,7 +14,9 @@ final class QuickNoteModel: ObservableObject {
     @Published private(set) var visible: [ScratchNote] = []
     @Published var status: String?
     @Published var statusIsError = false
-    @Published var theme: VehlaDockWidgetTheme?
+    @Published var theme: VehlaDockWidgetTheme? {
+        didSet { mathReference.updateAppearance(isDark: theme?.isDark); noteWindows.updateAppearance(isDark: theme?.isDark) }
+    }
     @Published var importPresented = false
     @Published var importPreview: ImportPreview?
     @Published var importSelection: Set<String> = []
@@ -40,6 +42,11 @@ final class QuickNoteModel: ObservableObject {
     private let importer = ScratchImporter()
     private let tools = ScratchTools()
     let mathReference = MathReferenceWindow()
+    let noteWindows = NoteWindows()
+    /// Formatting for each popped-out note, kept apart from the dock editor's
+    /// `analysis`, which follows the selection and pauses while it is hidden.
+    @Published private(set) var poppedAnalyses: [String: ScratchAnalysis] = [:]
+    private var poppedTasks: [String: Task<Void, Never>] = [:]
     private var loadTask: Task<Void, Never>?
     private var debounceTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -53,8 +60,9 @@ final class QuickNoteModel: ObservableObject {
     private var captureTask: Task<Void, Never>?
     private var active = false
     private var closed = false
-    private var lastClipboardIDs: Set<String> = []
     private var pasteboardChange = 0
+    /// The pasteboard AutoPaste reads; tests substitute a private one.
+    var pasteboard = NSPasteboard.general
     private var pasteDelimiter = "\n"
     private var captureNoteID: String?
     /// Text this widget copied itself; AutoPaste must not append it back.
@@ -130,7 +138,9 @@ final class QuickNoteModel: ObservableObject {
 
     func stop() {
         active = false
-        stopCapture()
+        // AutoPaste keeps collecting while the popup is closed: copying happens
+        // in other apps, which closes it. Only the user, a note change or
+        // unloading the widget turns it off.
         searchTask?.cancel(); analysisTask?.cancel(); replaceTask?.cancel(); preloadTask?.cancel(); preloadTask = nil; importTask?.cancel(); ocrTask?.cancel()
         importing = false; importPreview = nil; importPresented = false
         // Accepted writes must drain even when the surface disappears.
@@ -140,7 +150,8 @@ final class QuickNoteModel: ObservableObject {
 
     func close() {
         mathReference.close()
-        stop(); closed = true; loadTask?.cancel(); loadTask = nil
+        noteWindows.closeAll()
+        stopCapture(); stop(); closed = true; loadTask?.cancel(); loadTask = nil
         context = nil
     }
 
@@ -191,7 +202,7 @@ final class QuickNoteModel: ObservableObject {
     }
 
     private func pruneEmpty(except id: String? = nil) {
-        library.notes.removeAll { $0.id != id && $0.slot == nil && $0.deleted == nil && $0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        library.notes.removeAll { $0.id != id && $0.slot == nil && $0.deleted == nil && !noteWindows.contains($0.id) && $0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     func startNewNote(content: String = "") {
@@ -204,10 +215,66 @@ final class QuickNoteModel: ObservableObject {
     }
 
     func inlineEdited(_ text: String) {
-        guard ready, let index = library.notes.firstIndex(where: { $0.id == selectedID && $0.deleted == nil }) else { return }
+        guard let selectedID else { return }
+        edit(selectedID, text: text)
+    }
+
+    /// Edits any note, from the dock editor or a popped-out window; the other
+    /// editor showing the same note picks the text up from the library.
+    func edit(_ id: String, text: String) {
+        guard ready, let index = library.notes.firstIndex(where: { $0.id == id && $0.deleted == nil }) else { return }
         guard text.utf8.count <= QuickNoteDatabase.contentLimit else { fail("Notes are limited to 2 MB."); return }
-        draft = text; library.notes[index].content = text; library.notes[index].modified = Date()
-        changed(); analyze()
+        library.notes[index].content = text; library.notes[index].modified = Date()
+        if id == selectedID { draft = text }
+        changed()
+        if id == selectedID { analyze() }
+        analyzePopped(id)
+    }
+
+    /// Opens a note (the selected one by default) in its own floating window.
+    func popOut(_ id: String? = nil) {
+        guard ready, let id = id ?? selectedID, library.notes.contains(where: { $0.id == id && $0.deleted == nil }) else { return }
+        noteWindows.show(id: id, model: self)
+        analyzePopped(id)
+    }
+
+    func poppedClosed(_ id: String) {
+        poppedTasks.removeValue(forKey: id)?.cancel()
+        poppedAnalyses[id] = nil
+    }
+
+    private func analyzePopped(_ id: String) {
+        poppedTasks.removeValue(forKey: id)?.cancel()
+        guard noteWindows.contains(id), let text = library.notes.first(where: { $0.id == id })?.content else { return }
+        if let cached = presentations.result(for: id, text: text) { poppedAnalyses[id] = cached; return }
+        let tools = tools
+        poppedTasks[id] = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(140))
+                let result = try await tools.analyze(text)
+                guard let self, !Task.isCancelled, self.noteWindows.contains(id),
+                      self.library.notes.contains(where: { $0.id == id && $0.content == text }) else { return }
+                self.presentations.insert(result, for: id)
+                self.poppedAnalyses[id] = result
+            } catch is CancellationError {} catch { self?.fail(error.localizedDescription) }
+        }
+    }
+
+    /// Slash commands typed in a popped-out note. Only those about that note
+    /// apply; the rest act on the dock's selection, so they stay as text.
+    func poppedCommand(_ line: String, id: String) -> Bool {
+        switch line.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "/copy": copyNote(id); return true
+        default: return false
+        }
+    }
+
+    func poppedShortcut(_ shortcut: String, id: String) -> Bool {
+        switch shortcut {
+        case "bigger", "smaller": return perform(shortcut: shortcut)
+        case "close": noteWindows.close(id); return true
+        default: return false
+        }
     }
 
     func navigate(_ direction: Int) {
@@ -317,9 +384,13 @@ final class QuickNoteModel: ObservableObject {
     }
 
     func copyDraft() {
-        guard selected != nil else { return }
-        ownCopy = draft
-        context?.copyText(draft); pasteboardChange = NSPasteboard.general.changeCount; notice("Copied.")
+        guard let selectedID else { return }
+        copyNote(selectedID)
+    }
+    func copyNote(_ id: String) {
+        guard let text = library.notes.first(where: { $0.id == id })?.content else { return }
+        ownCopy = text
+        context?.copyText(text); pasteboardChange = pasteboard.changeCount; notice("Copied.")
     }
     private func entity() -> VehlaDockWidgetSharedContext? {
         guard let selected else { return nil }
@@ -507,6 +578,7 @@ final class QuickNoteModel: ObservableObject {
         case "void":
             guard let note = selected, note.slot == nil, note.deleted == nil else { return false }
             deletePresented = true
+        case "popout": popOut()
         case "swap": scope = scope == "slots" ? "stack" : "slots"; sidebar = true
         case "bigger": settings(fontSize: library.fontSize + 1)
         case "smaller": settings(fontSize: library.fontSize - 1)
@@ -521,58 +593,59 @@ final class QuickNoteModel: ObservableObject {
     }
 
     private func startCapture() {
-        guard active, let note = selected, note.deleted == nil else { return }
+        guard ready, let note = selected, note.deleted == nil else { return }
         autoPaste = true; captureNoteID = selectedID
-        pasteboardChange = NSPasteboard.general.changeCount
-        context?.clipboard?.setActiveViewer(true)
-        lastClipboardIDs = Set(context?.clipboard?.items(offset: 0, limit: 100).map(\.id) ?? [])
+        pasteboardChange = pasteboard.changeCount
         captureTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
-                guard let self, self.active, self.autoPaste else { return }
+                do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+                guard let self, self.autoPaste else { return }
                 self.captureClipboard()
             }
         }
-        notice("AutoPaste is on while the widget is visible.")
+        notice("AutoPaste is on. Text you copy anywhere is added to this note until you turn it off.")
     }
     func stopCapture() {
         captureTask?.cancel(); captureTask = nil; autoPaste = false; captureNoteID = nil
-        context?.clipboard?.setActiveViewer(false)
     }
+    /// Pasteboard markers apps use for passwords and one-off contents
+    /// (nspasteboard.org); AutoPaste never collects them.
+    nonisolated static let privatePasteboardTypes: Set<String> = [
+        "org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType", "org.nspasteboard.AutoGeneratedType",
+    ]
+    /// Reads the system pasteboard rather than Vehla's clipboard history: the
+    /// history only records while Clipboard Management is on, and it
+    /// reorders rather than re-adds a repeated copy.
     private func captureClipboard() {
-        guard selectedID == captureNoteID else { stopCapture(); return }
-        if let bridge = context?.clipboard {
-            let items = bridge.items(offset: 0, limit: 100)
-            let current = Set(items.map(\.id))
-            for item in items.reversed() where !lastClipboardIDs.contains(item.id) && item.kind != .image {
-                if item.text == ownCopy { ownCopy = nil; continue }
-                append(item.text, delimiter: pasteDelimiter)
-            }
-            lastClipboardIDs = current
-        } else {
-            let board = NSPasteboard.general
-            guard board.changeCount != pasteboardChange else { return }
-            pasteboardChange = board.changeCount
-            if let text = board.string(forType: .string), text != ownCopy { append(text, delimiter: pasteDelimiter) }
-        }
+        guard let id = captureNoteID, selectedID == id,
+              library.notes.contains(where: { $0.id == id && $0.deleted == nil }) else { stopCapture(); return }
+        let board = pasteboard
+        guard board.changeCount != pasteboardChange else { return }
+        pasteboardChange = board.changeCount
+        if board.types?.contains(where: { Self.privatePasteboardTypes.contains($0.rawValue) }) == true { return }
+        guard let text = board.string(forType: .string), !text.isEmpty else { return }
+        if text == ownCopy { ownCopy = nil; return }
+        append(text, delimiter: pasteDelimiter, to: id)
     }
-    private func append(_ text: String, delimiter: String = "\n") {
-        guard !text.isEmpty else { return }
-        inlineEdited(draft + (draft.isEmpty ? "" : delimiter) + text)
+    private func append(_ text: String, delimiter: String = "\n", to id: String? = nil) {
+        guard !text.isEmpty, let id = id ?? selectedID, let current = library.notes.first(where: { $0.id == id })?.content else { return }
+        edit(id, text: current + (current.isEmpty ? "" : delimiter) + text)
     }
-    func recognizeImage(_ data: Data) {
-        let id = selectedID, tools = tools
+    /// Adds an image's text to `target` (a popped-out note), or to the selected
+    /// note while the dock editor is showing.
+    func recognizeImage(_ data: Data, into target: String? = nil) {
+        let id = target ?? selectedID, tools = tools
         ocrTask?.cancel(); notice("Recognizing text locally…")
         ocrTask = Task { [weak self] in
             do {
                 let text = try await tools.ocr(data: data)
-                guard let self, !Task.isCancelled, self.active, self.selectedID == id else { return }
-                self.append(text); self.notice("Image text added.")
+                guard let self, !Task.isCancelled, let id, target != nil || (self.active && self.selectedID == id) else { return }
+                self.append(text, to: id); self.notice("Image text added.")
             } catch is CancellationError {} catch { self?.fail(error.localizedDescription) }
         }
     }
-    func recognizeFile(_ url: URL) {
-        let id = selectedID, tools = tools
+    func recognizeFile(_ url: URL, into target: String? = nil) {
+        let id = target ?? selectedID, tools = tools
         ocrTask?.cancel(); notice("Recognizing text locally…")
         ocrTask = Task { [weak self] in
             do {
@@ -583,8 +656,8 @@ final class QuickNoteModel: ObservableObject {
                 }.value
                 try Task.checkCancellation()
                 let text = try await tools.ocr(data: data)
-                guard let self, !Task.isCancelled, self.active, self.selectedID == id else { return }
-                self.append(text); self.notice("Image text added.")
+                guard let self, !Task.isCancelled, let id, target != nil || (self.active && self.selectedID == id) else { return }
+                self.append(text, to: id); self.notice("Image text added.")
             } catch is CancellationError {} catch { self?.fail(error.localizedDescription) }
         }
     }

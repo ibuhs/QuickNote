@@ -329,12 +329,12 @@ import VehlaDockWidgetSDK
         #expect(tracker.step(x: 0, y: 0, phase: .began) == .passThrough)
         #expect(tracker.step(x: 70, y: 2, phase: .changed) == .consume)
         #expect(tracker.step(x: 70, y: 1, phase: .changed) == .consume)
-        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(1))
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(-1))
         #expect(tracker.step(x: 100, y: 0, phase: [], momentum: .began) == .consume)
-        #expect(tracker.step(x: 0, y: 0, phase: .ended) != .navigate(1))
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) != .navigate(-1))
         _ = tracker.step(x: 0, y: 0, phase: .began)
         _ = tracker.step(x: -140, y: 0, phase: .changed)
-        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(-1))
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(1))
     }
 
     @Test func navigationRequiresDeliberateHorizontalTravel() {

@@ -281,6 +281,61 @@ import VehlaDockWidgetSDK
         #expect(model.sidebar && model.searchFocusRequest == request + 1)
     }
 
+    @Test func poppedOutNotesEditIndependentlyOfTheSelection() async throws {
+        let (model, root) = try await readyModel(); defer { model.close(); try? FileManager.default.removeItem(at: root) }
+        model.startNewNote()
+        let popped = try #require(model.selectedID)
+        model.popOut()
+        #expect(model.noteWindows.contains(popped))
+        // An empty popped-out note survives the empty-note pruning a new note triggers.
+        model.startNewNote()
+        let selected = try #require(model.selectedID)
+        #expect(selected != popped && model.library.notes.contains { $0.id == popped })
+        model.edit(popped, text: "math\n2 + 3 =")
+        #expect(model.library.notes.first { $0.id == popped }?.content == "math\n2 + 3 =")
+        #expect(model.selectedID == selected && model.draft.isEmpty)
+        for _ in 0..<100 where model.poppedAnalyses[popped]?.source != "math\n2 + 3 =" { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.poppedAnalyses[popped]?.mode == "math")
+        // Editing the selected note keeps the dock draft in step.
+        model.edit(selected, text: "hello"); #expect(model.draft == "hello")
+        // Slash commands about the dock's selection stay text in a popped-out note.
+        #expect(!model.poppedCommand("/new", id: popped))
+        #expect(model.poppedShortcut("close", id: popped))
+        #expect(!model.noteWindows.contains(popped) && model.poppedAnalyses[popped] == nil)
+    }
+
+    @Test func autoPasteKeepsCollectingWhileThePopupIsClosed() async throws {
+        let (model, root) = try await readyModel(); defer { model.close(); try? FileManager.default.removeItem(at: root) }
+        let board = NSPasteboard.withUniqueName(); defer { board.releaseGlobally() }
+        model.pasteboard = board
+        board.clearContents(); board.setString("before", forType: .string)
+        model.startNewNote()
+        #expect(model.command("/paste") && model.autoPaste)
+        // Copying in another app closes the popup; capture must survive it.
+        model.stop()
+        #expect(model.autoPaste)
+        func copy(_ text: String, private: Bool = false) async throws {
+            board.clearContents()
+            if `private` { board.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil) }
+            board.setString(text, forType: .string)
+            for _ in 0..<50 where !model.draft.hasSuffix(text) { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        try await copy("first"); try await copy("secret", private: true); try await copy("second")
+        #expect(model.draft == "first\nsecond", "Only copies made after /paste, never concealed ones")
+        model.start()
+        #expect(model.command("/paste") && !model.autoPaste)
+    }
+
+    @Test func trashingAPoppedOutNoteClosesItsWindow() async throws {
+        let (model, root) = try await readyModel(); defer { model.close(); try? FileManager.default.removeItem(at: root) }
+        let id = try #require(model.notes.first { $0.slot == nil }?.id)
+        model.select(id); model.popOut()
+        #expect(model.noteWindows.contains(id))
+        model.trash(id)
+        for _ in 0..<50 where model.noteWindows.contains(id) { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!model.noteWindows.contains(id))
+    }
+
     @Test func editorRoutesMenuShortcuts() throws {
         let view = InlineTextView(usingTextLayoutManager: false)
         var shortcuts: [String] = [], commands: [String] = []
@@ -294,7 +349,8 @@ import VehlaDockWidgetSDK
         }
         try press("F", [.command, .shift]); try press("f"); try press("s"); try press("d")
         try press("!", [.command, .shift], keyCode: 18)
-        #expect(shortcuts == ["find", "export", "void", "promote"])
+        try press("O", [.command, .shift]); try press("w")
+        #expect(shortcuts == ["find", "export", "void", "promote", "popout", "close"])
         #expect(commands == ["/search"])
         view.detach()
     }
