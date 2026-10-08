@@ -71,13 +71,13 @@ private struct PoppedNoteView: View {
                                  fontSize: model.library.fontSize, focusToken: focusToken,
                                  analysis: analysis, resultColor: model.library.mathResultColor ?? .automatic,
                                  onResultCopy: model.didCopyResult,
+                                 linedPaper: model.library.linedPaper,
                                  onCommand: { model.poppedCommand($0, id: id) },
                                  onShortcut: { model.poppedShortcut($0, id: id) },
                                  onImage: { model.recognizeImage($0, into: id) },
                                  onImageFile: { model.recognizeFile($0, into: id) },
                                  onOpenURL: { model.context?.open($0) })
                     .padding(.horizontal, 18).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background { if model.library.linedPaper { LinedPaper(fontSize: model.library.fontSize, color: secondary) } }
                 Divider()
                 HStack(spacing: 12) {
                     Text(model.isDirty ? "Saving…" : "Saved on this Mac")

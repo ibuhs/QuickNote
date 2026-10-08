@@ -233,11 +233,11 @@ private struct PopupNoteView: View {
                                      fontSize: model.library.fontSize, focusToken: model.focusToken,
                                      analysis: model.analysis, resultColor: model.library.mathResultColor ?? .automatic,
                                      onResultCopy: model.didCopyResult,
+                                     linedPaper: model.library.linedPaper,
                                      onCommand: model.command, onShortcut: model.perform(shortcut:), onNavigate: model.navigate, onEscape: model.escape,
                                      onImage: { model.recognizeImage($0) }, onImageFile: { model.recognizeFile($0) },
                                      onOpenURL: { model.context?.open($0) })
                     .padding(.horizontal, 18).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background { if model.library.linedPaper { LinedPaper(fontSize: model.library.fontSize, color: secondary) } }
                     .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
                         guard let provider = providers.first else { return false }
                         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -313,20 +313,6 @@ private struct PopupNoteView: View {
                     .help("Position in your notes; ⌘[ and ⌘] turn the page")
             }
         }.buttonStyle(.borderless).font(.system(size: 11)).padding(.horizontal, 16).padding(.vertical, 10)
-    }
-}
-
-struct LinedPaper: View {
-    let fontSize: Double
-    let color: Color
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            for y in stride(from: 28.0, to: size.height, by: fontSize * 1.5) {
-                path.move(to: CGPoint(x: 24, y: y)); path.addLine(to: CGPoint(x: size.width - 24, y: y))
-            }
-            context.stroke(path, with: .color(color.opacity(0.1)), lineWidth: 0.5)
-        }
     }
 }
 

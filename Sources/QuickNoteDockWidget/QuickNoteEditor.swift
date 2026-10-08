@@ -18,6 +18,7 @@ struct InlineNoteEditor: NSViewRepresentable {
     var analysis = ScratchAnalysis()
     var resultColor: MathResultColor = .automatic
     var onResultCopy: (String) -> Void = { _ in }
+    var linedPaper = false
     var onCommand: (String) -> Bool = { _ in false }
     var onShortcut: (String) -> Bool = { _ in false }
     var onNavigate: (Int) -> Void = { _ in }
@@ -68,6 +69,7 @@ struct InlineNoteEditor: NSViewRepresentable {
         textView.baseColor = textColor
         textView.resultColor = resultColor
         textView.onResultCopy = onResultCopy
+        textView.linedPaper = linedPaper
         textView.string = text
         if analysis.source == textView.string { textView.mathAnalysis = analysis }
         if !textView.restorePresentation(analysis) { textView.restyle() }
@@ -97,6 +99,7 @@ struct InlineNoteEditor: NSViewRepresentable {
         context.coordinator.onOpenURL = onOpenURL
         guard let textView = scroll.documentView as? InlineTextView else { return }
         textView.onResultCopy = onResultCopy
+        if textView.linedPaper != linedPaper { textView.linedPaper = linedPaper; textView.needsDisplay = true }
         if textView.resultColor != resultColor { textView.resultColor = resultColor; textView.needsDisplay = true }
         textView.onSave = onSave
         textView.onCommand = onCommand
@@ -274,6 +277,7 @@ final class InlineTextView: NSTextView {
     var baseColor: NSColor = .labelColor
     var resultColor: MathResultColor = .automatic
     var onResultCopy: (String) -> Void = { _ in }
+    var linedPaper = false
     private(set) var answerViews: [NSRange: MathAnswerTextView] = [:]
     private weak var selectedMathAnswer: MathAnswerTextView?
     private struct MathTooltip {
@@ -466,10 +470,51 @@ final class InlineTextView: NSTextView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if linedPaper {
+            baseColor.withAlphaComponent(0.1).setStroke()
+            let rules = NSBezierPath()
+            rules.lineWidth = 0.5
+            for y in paperRulePositions(in: dirtyRect) {
+                rules.move(to: NSPoint(x: textContainerInset.width, y: y))
+                rules.line(to: NSPoint(x: bounds.maxX - textContainerInset.width, y: y))
+            }
+            rules.stroke()
+        }
         super.draw(dirtyRect)
         drawCheckboxes()
         drawMathResults(in: dirtyRect)
         drawFallbackCaret()
+    }
+
+    /// Rules share document coordinates with the glyphs, including wrapped and
+    /// differently sized lines. Only visible fragments and empty rows are drawn.
+    func paperRulePositions(in rect: NSRect) -> [CGFloat] {
+        guard let manager = layoutManager, let container = textContainer else { return [] }
+        let origin = textContainerOrigin
+        let glyphs = manager.glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: container)
+        var positions: [CGFloat] = []
+        manager.enumerateLineFragments(forGlyphRange: glyphs) { fragment, _, _, _, _ in
+            let top = fragment.minY + origin.y
+            let bottom = fragment.maxY + origin.y
+            if positions.isEmpty, top >= rect.minY { positions.append(top) }
+            if bottom >= rect.minY, bottom <= rect.maxY { positions.append(bottom) }
+        }
+        if NSMaxRange(glyphs) >= manager.numberOfGlyphs {
+            let height = manager.defaultLineHeight(for: baseFont)
+            guard height > 0 else { return positions }
+            var end = positions.last ?? origin.y
+            if manager.extraLineFragmentTextContainer === container {
+                let extra = manager.extraLineFragmentRect.offsetBy(dx: origin.x, dy: origin.y)
+                if extra.maxY > end { end = extra.maxY }
+                if end >= rect.minY, end <= rect.maxY, positions.last != end { positions.append(end) }
+            }
+            while end < rect.minY { end += height }
+            while end <= rect.maxY {
+                if positions.last != end { positions.append(end) }
+                end += height
+            }
+        }
+        return positions
     }
 
     @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
@@ -1146,6 +1191,13 @@ final class NoteScrollView: NSScrollView {
         var clip = contentView.frame
         clip.size.width = max(0, bounds.width - NoteScrollRail.width)
         contentView.frame = clip
+        if let editor = documentView as? InlineTextView {
+            editor.minSize = NSSize(width: 0, height: clip.height)
+            if editor.frame.height < clip.height {
+                editor.setFrameSize(NSSize(width: clip.width, height: clip.height))
+            }
+            editor.needsDisplay = true
+        }
         rail.frame = NSRect(x: bounds.width - NoteScrollRail.width, y: 0, width: NoteScrollRail.width, height: bounds.height)
         rail.refreshPositions()
     }
