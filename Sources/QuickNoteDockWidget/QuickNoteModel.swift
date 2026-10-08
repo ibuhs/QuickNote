@@ -12,7 +12,20 @@ final class QuickNoteModel: ObservableObject {
     @Published var query = "" { didSet { search() } }
     @Published var scope = "stack" { didSet { search() } }
     @Published private(set) var visible: [ScratchNote] = []
-    @Published var status: String?
+    @Published var status: String? {
+        didSet {
+            statusDismissTask?.cancel()
+            statusDismissTask = nil
+            guard status != nil, !statusIsError, !closed else { return }
+            statusDismissTask = Task { [weak self, delay = statusDismissDelay] in
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard !Task.isCancelled else { return }
+                self?.status = nil
+            }
+        }
+    }
+    var statusDismissDelay: Duration = .seconds(3)
+    private var statusDismissTask: Task<Void, Never>?
     @Published var statusIsError = false
     @Published var theme: VehlaDockWidgetTheme? {
         didSet { mathReference.updateAppearance(isDark: theme?.isDark); noteWindows.updateAppearance(isDark: theme?.isDark) }
@@ -152,6 +165,7 @@ final class QuickNoteModel: ObservableObject {
         mathReference.close()
         noteWindows.closeAll()
         stopCapture(); stop(); closed = true; loadTask?.cancel(); loadTask = nil
+        statusDismissTask?.cancel(); statusDismissTask = nil
         context = nil
     }
 

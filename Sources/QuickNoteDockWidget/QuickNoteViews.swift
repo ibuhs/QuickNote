@@ -307,7 +307,6 @@ private struct PopupNoteView: View {
                 Text(model.analysis.summary).font(.system(size: 10)).foregroundStyle(secondary)
             }
             Button { model.copyDraft() } label: { Image(systemName: "doc.on.doc") }.help("Copy note").disabled(model.selected == nil)
-            Button { model.beginImport() } label: { Image(systemName: "square.and.arrow.down") }.help("Import Notes").disabled(!model.ready)
             if let page = model.pageLabel {
                 Text(page).font(.system(size: 10, design: .monospaced)).monospacedDigit().foregroundStyle(secondary)
                     .help("Position in your notes; ⌘[ and ⌘] turn the page")

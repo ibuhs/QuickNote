@@ -5,6 +5,29 @@ import VehlaDockWidgetSDK
 @testable import QuickNoteDockWidget
 
 struct ResultInteractionTests {
+    @Test @MainActor func noticesExpireButErrorsAndNewerMessagesRemain() async throws {
+        let model = QuickNoteModel()
+        model.statusDismissDelay = .milliseconds(100)
+        defer { model.close() }
+        model.status = "Copied."
+        try await Task.sleep(for: .milliseconds(60))
+        model.status = "Exported."
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(model.status == "Exported.")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(model.status == nil)
+        model.status = "Copied."
+        model.sendToNotes() // Unsupported bridge reports an error.
+        try await Task.sleep(for: .milliseconds(160))
+        #expect(model.statusIsError && model.status != nil)
+        model.status = nil
+        model.statusIsError = false
+        model.status = "Copied."
+        model.close()
+        try await Task.sleep(for: .milliseconds(160))
+        #expect(model.status == "Copied.") // No delayed callbacks after teardown.
+    }
+
     @Test func resultColorIsBackwardCompatibleAndPersists() throws {
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
