@@ -12,7 +12,20 @@ final class QuickNoteModel: ObservableObject {
     @Published var query = "" { didSet { search() } }
     @Published var scope = "stack" { didSet { search() } }
     @Published private(set) var visible: [ScratchNote] = []
-    @Published var status: String?
+    @Published var status: String? {
+        didSet {
+            statusDismissTask?.cancel()
+            statusDismissTask = nil
+            guard status != nil, !statusIsError, !closed else { return }
+            statusDismissTask = Task { [weak self, delay = statusDismissDelay] in
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard !Task.isCancelled else { return }
+                self?.status = nil
+            }
+        }
+    }
+    var statusDismissDelay: Duration = .seconds(3)
+    private var statusDismissTask: Task<Void, Never>?
     @Published var statusIsError = false
     @Published var theme: VehlaDockWidgetTheme? {
         didSet { mathReference.updateAppearance(isDark: theme?.isDark); noteWindows.updateAppearance(isDark: theme?.isDark) }
@@ -152,6 +165,7 @@ final class QuickNoteModel: ObservableObject {
         mathReference.close()
         noteWindows.closeAll()
         stopCapture(); stop(); closed = true; loadTask?.cancel(); loadTask = nil
+        statusDismissTask?.cancel(); statusDismissTask = nil
         context = nil
     }
 
@@ -317,11 +331,12 @@ final class QuickNoteModel: ObservableObject {
         scope = "slots"
     }
 
-    func settings(expiry: Int? = nil, fontSize: Double? = nil, lined: Bool? = nil) {
+    func settings(expiry: Int? = nil, fontSize: Double? = nil, lined: Bool? = nil, mathColor: MathResultColor? = nil) {
         guard ready else { return }
         if let expiry { library.expiryDays = expiry; library.expire(); ensureSelection(); analyze() }
         if let fontSize { library.fontSize = min(28, max(11, fontSize)) }
         if let lined { library.linedPaper = lined }
+        if let mathColor { library.mathResultColor = mathColor }
         changed()
     }
 
@@ -386,6 +401,12 @@ final class QuickNoteModel: ObservableObject {
     func copyDraft() {
         guard let selectedID else { return }
         copyNote(selectedID)
+    }
+    /// Native result Copy already wrote the clipboard; AutoPaste must not feed
+    /// that result back into this note as external capture.
+    func didCopyResult(_ text: String) {
+        ownCopy = text
+        pasteboardChange = pasteboard.changeCount
     }
     func copyNote(_ id: String) {
         guard let text = library.notes.first(where: { $0.id == id })?.content else { return }

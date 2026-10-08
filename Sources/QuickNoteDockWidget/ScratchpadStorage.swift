@@ -21,6 +21,7 @@ struct ScratchLibrary: Codable, Equatable, Sendable {
     var expiryDays = 0
     var fontSize: Double = 15
     var linedPaper = false
+    var mathResultColor: MathResultColor?
     var importedKeys: Set<String> = []
 
     func validate() throws {
