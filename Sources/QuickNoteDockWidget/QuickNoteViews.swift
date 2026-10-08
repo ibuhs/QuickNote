@@ -90,6 +90,7 @@ private struct PopupNoteView: View {
             Button { model.startNewNote() } label: { Image(systemName: "square.and.pencil") }.help("New note (⌘N)")
                 .keyboardShortcut("n", modifiers: .command).disabled(!model.ready)
             Menu {
+                Button("Math Reference…") { model.mathReference.show(model: model) }
                 Menu("Math 108X Examples") {
                     ForEach(CourseMathExamples.all, id: \.title) { example in
                         Button(example.title) { model.startNewNote(content: example.content) }

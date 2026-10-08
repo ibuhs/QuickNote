@@ -2,6 +2,8 @@
 
 Reviewed the 12-lesson [Math for the Real World textbook](https://books.byui.edu/math_for_the_real_world/) and its [299-page PDF](https://books.byui.edu/pdf/694). QuickNote's numeric helpers cover the equation-based work below. All examples are available through **More → Math 108X Examples**, which creates an editable note using the normal note lifecycle and persistence. No existing notes are rewritten.
 
+**More → Math Reference…** opens a searchable native utility window with every supported built-in function, syntax, examples, units and limits. It remains open while typing or moving between notes, until its close button or Done is used. Opening it does not change notes; select example text to copy it. Unloading the extension closes the window.
+
 Start a note or section with `math`, put one expression on each line, and end queries in `=`. Assignment lines use `name = expression`. Function definitions use `f(x) = 5x - 2`; calls show the substituted rule and result, such as `f(4) =` → `5(4) - 2 = 18`. Hover an answer for its complete text. Repeating calls produces input/output rows. Multi-parameter functions, nested functions, redefinitions and cross-section variables work. A definition's parameters stay local; other variables use values in effect at the calling line.
 
 ## Course coverage
