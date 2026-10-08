@@ -269,11 +269,34 @@ struct MathParser {
     private var position = 0
     private var depth = 0
     private let variables: [String: Double]
+    private static let groupedNumber = try! NSRegularExpression(pattern: #"(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d.,])"#)
+    private static let tokenPattern = try! NSRegularExpression(pattern: #"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+|[a-zA-Z_][a-zA-Z_0-9]*|[^\s]"#)
     init(_ expression: String, variables: [String: Double] = [:]) {
         self.variables = variables
-        let normalized = expression.replacingOccurrences(of: "×", with: "*").replacingOccurrences(of: "÷", with: "/").replacingOccurrences(of: "**", with: "^").replacingOccurrences(of: ",", with: "")
-        let regex = try! NSRegularExpression(pattern: #"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+|[a-zA-Z_][a-zA-Z_0-9]*|[^\s]"#)
-        tokens = regex.matches(in: normalized, range: NSRange(location: 0, length: (normalized as NSString).length)).map { (normalized as NSString).substring(with: $0.range) }
+        // Bound normalization/tokenization as well as recursive evaluation.
+        guard expression.utf8.count <= 16_384 else { tokens = []; return }
+        // Commas separate function arguments. Preserve legacy thousands grouping
+        // outside parentheses; inside calls use ungrouped numbers.
+        var nesting = 0
+        var ungrouped = ""
+        var outside = ""
+        func flush() {
+            // Remove commas only from a complete, valid grouped number.
+            let source = outside as NSString
+            for match in Self.groupedNumber.matches(in: outside, range: NSRange(location: 0, length: source.length)).reversed() {
+                outside = (outside as NSString).replacingCharacters(in: match.range,
+                    with: source.substring(with: match.range).replacingOccurrences(of: ",", with: ""))
+            }
+            ungrouped += outside; outside = ""
+        }
+        for character in expression {
+            if character == "(" { if nesting == 0 { flush() }; nesting += 1 }
+            if nesting == 0 { outside.append(character) } else { ungrouped.append(character) }
+            if character == ")" { nesting -= 1 }
+        }
+        flush()
+        let normalized = ungrouped.replacingOccurrences(of: "×", with: "*").replacingOccurrences(of: "÷", with: "/").replacingOccurrences(of: "**", with: "^").replacingOccurrences(of: "−", with: "-").replacingOccurrences(of: "π", with: "pi")
+        tokens = Self.tokenPattern.matches(in: normalized, range: NSRange(location: 0, length: (normalized as NSString).length)).map { (normalized as NSString).substring(with: $0.range) }
     }
     mutating func evaluate() throws -> Double {
         guard tokens.count <= 512 else { throw ScratchError.message("Expression too long") }
@@ -321,23 +344,83 @@ struct MathParser {
         guard let token = current else { throw ScratchError.message("Missing number") }
         position += 1
         if let number = Double(token) { return number }
-        if let value = variables[token] { return value }
-        if token == "pi" { return .pi }
-        if ["sqrt", "abs", "ceil", "floor", "log", "log2", "sin", "cos"].contains(token), take("(") {
-            let value = try sum(); guard take(")") else { throw ScratchError.message("Missing parenthesis") }
-            switch token {
-            case "sqrt": return sqrt(value)
-            case "abs": return abs(value)
-            case "ceil": return ceil(value)
-            case "floor": return floor(value)
-            case "log": return log10(value)
-            case "log2": return log2(value)
-            case "sin": return sin(value)
-            default: return cos(value)
+        // A call takes priority over a same-named variable. Bare identifiers
+        // still resolve to user variables before built-in constants.
+        if take("(") {
+            var arguments: [Double] = []
+            if !take(")") {
+                repeat { arguments.append(try sum()) } while take(",")
+                guard take(")") else { throw ScratchError.message("Missing parenthesis") }
             }
+            return try Self.call(token.lowercased(), arguments: arguments)
+        }
+        if let value = variables[token] { return value }
+        switch token.lowercased() {
+        case "pi": return .pi
+        case "tau": return 2 * .pi
+        case "e": return exp(1)
+        default: break
         }
         throw ScratchError.message("Unknown variable")
     }
+
+    /// Only explicitly supported numeric functions are callable. Every argument
+    /// and result must be finite, including nested domain/overflow errors.
+    private static func call(_ name: String, arguments: [Double]) throws -> Double {
+        guard arguments.allSatisfy(\.isFinite) else { throw ScratchError.message("Invalid argument") }
+        func require(_ count: Int) throws {
+            guard arguments.count == count else { throw ScratchError.message("Wrong number of arguments") }
+        }
+        let value: Double
+        if ["min", "max"].contains(name) {
+            guard !arguments.isEmpty else { throw ScratchError.message("Missing argument") }
+            value = name == "min" ? arguments.min()! : arguments.max()!
+        } else if ["pow", "atan2", "hypot", "log"].contains(name), arguments.count == 2 {
+            let a = arguments[0], b = arguments[1]
+            switch name {
+            case "pow": value = pow(a, b)
+            case "atan2": value = atan2(a, b) // y, x; radians
+            case "hypot": value = hypot(a, b)
+            default:
+                guard a > 0, b > 0, b != 1 else { throw ScratchError.message("Invalid logarithm") }
+                value = log(a) / log(b)
+            }
+        } else {
+            try require(1)
+            let a = arguments[0]
+            switch name {
+            case "sqrt": value = sqrt(a)
+            case "cbrt": value = cbrt(a)
+            case "abs": value = abs(a)
+            case "ceil": value = ceil(a)
+            case "floor": value = floor(a)
+            case "round": value = a.rounded()
+            case "trunc": value = a.rounded(.towardZero)
+            case "log", "log10": value = log10(a)
+            case "log2": value = log2(a)
+            case "ln": value = log(a)
+            case "exp": value = exp(a)
+            case "sin": value = sin(a)
+            case "cos": value = cos(a)
+            case "tan": value = tan(a)
+            case "asin", "arcsin": value = asin(a)
+            case "acos", "arccos": value = acos(a)
+            case "atan", "arctan": value = atan(a)
+            case "sinh": value = sinh(a)
+            case "cosh": value = cosh(a)
+            case "tanh": value = tanh(a)
+            case "asinh": value = asinh(a)
+            case "acosh": value = acosh(a)
+            case "atanh": value = atanh(a)
+            case "rad": value = a / 180 * .pi
+            case "deg": value = a / .pi * 180
+            default: throw ScratchError.message("Unknown function")
+            }
+        }
+        guard value.isFinite else { throw ScratchError.message("Non-finite result") }
+        return value
+    }
+
 }
 
 struct ScratchTimerCommand: Equatable, Sendable {

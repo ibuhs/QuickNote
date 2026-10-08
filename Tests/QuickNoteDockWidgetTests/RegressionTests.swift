@@ -76,7 +76,7 @@ import VehlaDockWidgetSDK
                                   movement: NSTextMovement.return.rawValue, isFinal: true)
             if let text = expected[word] { #expect(view.string == text, "\(word)") }
             else if actions.contains(word) { #expect(received == [word] && view.string == "Note\n", "\(word)") }
-            else { #expect(view.string.count > 6 && !view.string.contains("/"), "\(word)") }
+            else { #expect(view.string.count > 6 && !view.string.contains(word), "\(word)") }
         }
         view.detach()
     }
