@@ -692,13 +692,17 @@ final class InlineTextView: NSTextView {
                         .font: NSFont.monospacedSystemFont(ofSize: max(10, font.pointSize * 0.72), weight: .semibold),
                         .foregroundColor: baseColor.withAlphaComponent(0.55), .kern: 1.5,
                     ], range: span.range)
-                case "answer":
-                    let paragraph = NSMutableParagraphStyle()
-                    paragraph.tailIndent = -Self.answerWidth
-                    storage.addAttribute(.paragraphStyle, value: paragraph, range: span.range)
                 default: break
                 }
             }
+        }
+        // A math section can contain prose, comments and incomplete expressions.
+        // Only evaluated lines need room for an inline result.
+        for result in mathAnalysis.mathResults where !result.isHint {
+            guard result.range.length > 0, NSMaxRange(result.range) <= storage.length else { continue }
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.tailIndent = -Self.answerWidth
+            storage.addAttribute(.paragraphStyle, value: paragraph, range: result.range)
         }
         for box in checkboxes {
             guard NSMaxRange(box.marker) <= storage.length, NSMaxRange(box.body) <= storage.length else { continue }
