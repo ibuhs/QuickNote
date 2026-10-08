@@ -15,7 +15,7 @@ import VehlaDockWidgetSDK
         let root = try scratch(); defer { try? FileManager.default.removeItem(at: root) }
         let repo = ScratchRepository(root: root)
         var state = try await repo.load()
-        #expect(state.notes.count == 5)
+        #expect(state.notes.count == 7)
         let original = state
         state.notes[0].content = "Actual user note"; state.revision = 2
         try await repo.save(state)

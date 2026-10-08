@@ -39,6 +39,7 @@ final class QuickNoteModel: ObservableObject {
     private var repository: ScratchRepository?
     private let importer = ScratchImporter()
     private let tools = ScratchTools()
+    let mathReference = MathReferenceWindow()
     private var loadTask: Task<Void, Never>?
     private var debounceTask: Task<Void, Never>?
     private var saveTask: Task<Void, Never>?
@@ -138,6 +139,7 @@ final class QuickNoteModel: ObservableObject {
     }
 
     func close() {
+        mathReference.close()
         stop(); closed = true; loadTask?.cancel(); loadTask = nil
         context = nil
     }

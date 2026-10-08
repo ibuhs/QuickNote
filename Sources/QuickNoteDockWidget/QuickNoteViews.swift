@@ -90,6 +90,12 @@ private struct PopupNoteView: View {
             Button { model.startNewNote() } label: { Image(systemName: "square.and.pencil") }.help("New note (⌘N)")
                 .keyboardShortcut("n", modifiers: .command).disabled(!model.ready)
             Menu {
+                Button("Math Reference…") { model.mathReference.show(model: model) }
+                Menu("Math 108X Examples") {
+                    ForEach(CourseMathExamples.all, id: \.title) { example in
+                        Button(example.title) { model.startNewNote(content: example.content) }
+                    }
+                }.disabled(!model.ready)
                 Button("Import Notes…") { model.beginImport() }.disabled(!model.ready)
                 Button("Export Text…") { model.export() }.keyboardShortcut("s", modifiers: .command).disabled(!model.ready || model.selected == nil)
                 Button("Export Markdown…") { model.export(markdown: true) }.disabled(!model.ready || model.selected == nil)

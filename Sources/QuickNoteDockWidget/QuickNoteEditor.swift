@@ -263,8 +263,15 @@ final class InlineTextView: NSTextView {
     var focusOnAttach = false
     var baseFont: NSFont = .systemFont(ofSize: 15)
     var baseColor: NSColor = .labelColor
+    private struct MathTooltip {
+        var tag: NSView.ToolTipTag
+        var rect: NSRect
+        var text: String
+    }
+    private var mathTooltips: [NSRange: MathTooltip] = [:]
     var mathAnalysis = ScratchAnalysis() {
         didSet {
+            removeAllToolTips(); mathTooltips.removeAll(keepingCapacity: true)
             needsDisplay = true
             let spoken = mathAnalysis.mathResults.filter { !$0.isHint }.map(\.answer)
             setAccessibilityHelp(spoken.isEmpty ? nil : spoken.joined(separator: ". "))
@@ -299,7 +306,7 @@ final class InlineTextView: NSTextView {
                         (string as NSString).substring(with: affectedCharRange).contains(where: \.isNewline) { return nil }
                     range.length = max(0, range.length + delta)
                 }
-                return ScratchMathResult(range: range, answer: result.answer)
+                return ScratchMathResult(range: range, answer: result.answer, isHint: result.isHint)
             }
             mathAnalysis = updated
         }
@@ -446,7 +453,14 @@ final class InlineTextView: NSTextView {
         drawFallbackCaret()
     }
 
+    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+        mathTooltips.values.first { $0.tag == tag }?.text ?? ""
+    }
+
     private func drawMathResults(in dirtyRect: NSRect) {
+        for (range, tooltip) in mathTooltips where !tooltip.rect.intersects(visibleRect) {
+            removeToolTip(tooltip.tag); mathTooltips.removeValue(forKey: range)
+        }
         guard !mathAnalysis.mathResults.isEmpty,
               let manager = layoutManager, let container = textContainer else { return }
         let visible = manager.glyphRange(forBoundingRect: dirtyRect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y), in: container)
@@ -487,6 +501,15 @@ final class InlineTextView: NSTextView {
             let used = manager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
             let rect = NSRect(x: x, y: used.midY + textContainerOrigin.y - height / 2, width: width, height: height)
             text.draw(in: rect, withAttributes: style)
+            if !result.isHint {
+                if let old = mathTooltips[result.range], old.rect != rect {
+                    removeToolTip(old.tag); mathTooltips.removeValue(forKey: result.range)
+                }
+                if mathTooltips[result.range] == nil {
+                    let tag = addToolTip(rect, owner: self, userData: nil)
+                    mathTooltips[result.range] = MathTooltip(tag: tag, rect: rect, text: result.answer)
+                }
+            }
             _ = line
         }
     }
