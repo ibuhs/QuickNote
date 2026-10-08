@@ -151,6 +151,7 @@ actor ScratchTools {
         }
         // Evaluate in document order so variables flow between math sections.
         var variables: [String: Double] = [:]
+        var functions: [String: MathFunction] = [:]
         for (lineInfo, inNoteMode) in mathLines.sorted(by: { $0.line.range.location < $1.line.range.location }) {
             let range = lineInfo.range, line = source.substring(with: range)
             try Task.checkCancellation()
@@ -158,21 +159,36 @@ actor ScratchTools {
             guard !trimmed.isEmpty, !trimmed.hasPrefix("//") else { continue }
             var expression = trimmed
             var variable: String?
-            if let equals = trimmed.firstIndex(of: "="), !trimmed.hasSuffix("=") {
-                let name = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
-                if name.range(of: #"^[a-zA-Z_][a-zA-Z_0-9]*$"#, options: .regularExpression) != nil {
-                    variable = name; expression = String(trimmed[trimmed.index(after: equals)...])
-                } else { continue }
-            } else if trimmed.hasSuffix("=") { expression = String(trimmed.dropLast()) }
-            else { continue }
             do {
+                guard trimmed.utf8.count <= 17_408 else { throw ScratchError.message("Expression too long") }
+                if let equals = trimmed.firstIndex(of: "="), !trimmed.hasSuffix("=") {
+                    let name = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+                    expression = String(trimmed[trimmed.index(after: equals)...]).trimmingCharacters(in: .whitespaces)
+                    if let (name, function) = try MathFunction.definition(name, expression: expression) {
+                        guard functions.count < 64 || functions[name] != nil else { throw ScratchError.message("Too many functions") }
+                        functions[name] = function
+                        let answer = "Function · " + function.parameters.joined(separator: ", ")
+                        result.mathResults.append(ScratchMathResult(range: range, answer: answer))
+                        if inNoteMode { result.results.append("Line \(lineInfo.number)  →  \(answer)") }
+                        continue
+                    }
+                    if name.range(of: #"^[a-zA-Z_][a-zA-Z_0-9]*$"#, options: .regularExpression) != nil {
+                        variable = name
+                    } else { throw ScratchError.message("Invalid definition") }
+                } else if trimmed.hasSuffix("=") { expression = String(trimmed.dropLast()) }
+                else { continue }
+                var explanation: String?
                 let value: Double
                 if let converted = Self.convert(expression) { value = converted.value }
-                else { var parser = MathParser(expression, variables: variables); value = try parser.evaluate() }
+                else {
+                    var parser = MathParser(expression, variables: variables, functions: functions)
+                    value = try parser.evaluate(); explanation = parser.explanation
+                }
                 guard value.isFinite else { throw ScratchError.message("Non-finite result") }
                 if let variable { variables[variable] = value }
                 let unit = Self.convert(expression)?.unit ?? ""
-                let answer = "\(Self.format(value))\(unit.isEmpty ? "" : " " + unit)"
+                let numericAnswer = "\(Self.format(value))\(unit.isEmpty ? "" : " " + unit)"
+                let answer = explanation.map { $0 + " = " + numericAnswer } ?? numericAnswer
                 if inNoteMode { result.results.append("Line \(lineInfo.number)  →  \(answer)") }
                 result.mathResults.append(ScratchMathResult(range: range, answer: answer))
             } catch {
@@ -242,7 +258,7 @@ actor ScratchTools {
     static func convert(_ expression: String) -> (value: Double, unit: String)? {
         let parts = expression.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         guard parts.count == 4, parts[2] == "to", let number = Double(parts[0]) else { return nil }
-        let units: [String: (String, Double)] = ["m": ("length", 1), "cm": ("length", 0.01), "mm": ("length", 0.001), "km": ("length", 1000), "in": ("length", 0.0254), "ft": ("length", 0.3048), "yd": ("length", 0.9144), "mi": ("length", 1609.344), "g": ("mass", 1), "kg": ("mass", 1000), "lb": ("mass", 453.59237), "oz": ("mass", 28.349523125), "ml": ("volume", 1), "l": ("volume", 1000), "gal": ("volume", 3785.411784), "s": ("time", 1), "min": ("time", 60), "h": ("time", 3600)]
+        let units: [String: (String, Double)] = ["m": ("length", 1), "cm": ("length", 0.01), "mm": ("length", 0.001), "km": ("length", 1000), "in": ("length", 0.0254), "ft": ("length", 0.3048), "yd": ("length", 0.9144), "mi": ("length", 1609.344), "g": ("mass", 1), "kg": ("mass", 1000), "lb": ("mass", 453.59237), "oz": ("mass", 28.349523125), "ml": ("volume", 1), "l": ("volume", 1000), "gal": ("volume", 3785.411784), "m/s": ("speed", 1), "km/h": ("speed", 1/3.6), "mph": ("speed", 0.44704), "ft/s": ("speed", 0.3048), "s": ("time", 1), "min": ("time", 60), "h": ("time", 3600)]
         if let from = units[parts[1]], let to = units[parts[3]], from.0 == to.0 { return (number * from.1 / to.1, parts[3]) }
         if parts[1] == "c", parts[3] == "f" { return (number * 9 / 5 + 32, "°F") }
         if parts[1] == "f", parts[3] == "c" { return ((number - 32) * 5 / 9, "°C") }
@@ -263,16 +279,64 @@ actor ScratchTools {
     }
 }
 
+/// Numeric functions belong to the note analysis, never global or persisted state.
+struct MathFunction: Sendable {
+    let parameters: [String]
+    let expression: String
+    private static let signature = try! NSRegularExpression(pattern: #"^([a-zA-Z_][a-zA-Z_0-9]*)\s*\(([^()]*)\)$"#)
+    static func definition(_ signature: String, expression: String) throws -> (String, Self)? {
+        let source = signature as NSString
+        guard let match = Self.signature.firstMatch(in: signature, range: NSRange(location: 0, length: source.length)) else { return nil }
+        let name = source.substring(with: match.range(at: 1))
+        let parameters = source.substring(with: match.range(at: 2)).components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parameters.count <= 16, Set(parameters).count == parameters.count,
+              parameters.allSatisfy({ $0.range(of: #"^[a-zA-Z_][a-zA-Z_0-9]*$"#, options: .regularExpression) != nil }),
+              !MathParser.builtins.contains(name.lowercased()),
+              !expression.trimmingCharacters(in: .whitespaces).isEmpty, expression.utf8.count <= 16_384 else {
+            throw ScratchError.message("Invalid function definition")
+        }
+        return (name, Self(parameters: parameters, expression: expression))
+    }
+
+    private static let substitutionTokens = try! NSRegularExpression(pattern: #"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+|[a-zA-Z_][a-zA-Z_0-9]*"#)
+    func substitution(_ arguments: [Double]) -> String {
+        var text = expression
+        // Replace whole identifier tokens, so x never alters exp or max.
+        let regex = Self.substitutionTokens
+        let source = text as NSString
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: source.length)).reversed() {
+            guard let index = parameters.firstIndex(of: source.substring(with: match.range)) else { continue }
+            let suffix = source.substring(from: NSMaxRange(match.range)).trimmingCharacters(in: .whitespaces)
+            if MathParser.builtins.contains(parameters[index].lowercased()), suffix.hasPrefix("(") { continue }
+            var argument = String(arguments[index])
+            if argument.hasSuffix(".0") { argument.removeLast(2) }
+            text = (text as NSString).replacingCharacters(in: match.range, with: "(" + argument + ")")
+        }
+        return text
+    }
+}
+
+/// Shared across nested calls to bound branching as well as recursion.
+private final class MathWorkBudget {
+    var remaining = 4096
+}
+
 /// A bounded arithmetic grammar, rather than executing arbitrary expressions.
 struct MathParser {
     private var tokens: [String]
     private var position = 0
     private var depth = 0
     private let variables: [String: Double]
+    private let functions: [String: MathFunction]
+    private var callDepth = 0
+    private var budget = MathWorkBudget()
+    private(set) var explanation: String?
+    static let builtins: Set<String> = Set(["sqrt", "cbrt", "abs", "ceil", "floor", "round", "trunc", "log", "log10", "log2", "ln", "exp", "sin", "cos", "tan", "asin", "acos", "atan", "arcsin", "arccos", "arctan", "atan2", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "rad", "deg", "pow", "hypot", "min", "max"]).union(CourseMath.names)
     private static let groupedNumber = try! NSRegularExpression(pattern: #"(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d.,])"#)
     private static let tokenPattern = try! NSRegularExpression(pattern: #"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+|[a-zA-Z_][a-zA-Z_0-9]*|[^\s]"#)
-    init(_ expression: String, variables: [String: Double] = [:]) {
+    init(_ expression: String, variables: [String: Double] = [:], functions: [String: MathFunction] = [:]) {
         self.variables = variables
+        self.functions = functions
         // Bound normalization/tokenization as well as recursive evaluation.
         guard expression.utf8.count <= 16_384 else { tokens = []; return }
         // Commas separate function arguments. Preserve legacy thousands grouping
@@ -323,9 +387,13 @@ struct MathParser {
     }
     private mutating func product() throws -> Double {
         var value = try power()
-        while ["*", "/", "x", "of"].contains(current ?? "") {
-            let op = current!; position += 1; let rhs = try power()
-            value = op == "/" ? value / rhs : value * rhs
+        while let token = current {
+            let explicit = ["*", "/", "of"].contains(token) || (token == "x" && variables["x"] == nil && functions["x"] == nil)
+            let implicit = token == "(" || variables[token] != nil || functions[token] != nil || Self.builtins.contains(token.lowercased()) || ["pi", "tau", "e"].contains(token.lowercased())
+            guard explicit || implicit else { break }
+            if explicit { position += 1 }
+            let rhs = try power()
+            value = token == "/" ? value / rhs : value * rhs
         }
         return value
     }
@@ -342,15 +410,32 @@ struct MathParser {
         if take("-") { return -(try power()) }
         if take("(") { let value = try sum(); guard take(")") else { throw ScratchError.message("Missing parenthesis") }; return value }
         guard let token = current else { throw ScratchError.message("Missing number") }
+        budget.remaining -= 1
+        guard budget.remaining >= 0 else { throw ScratchError.message("Calculation too complex") }
+        let start = position
         position += 1
         if let number = Double(token) { return number }
         // A call takes priority over a same-named variable. Bare identifiers
         // still resolve to user variables before built-in constants.
-        if take("(") {
+        if (functions[token] != nil || Self.builtins.contains(token.lowercased()) || variables[token] == nil), take("(") {
             var arguments: [Double] = []
             if !take(")") {
                 repeat { arguments.append(try sum()) } while take(",")
                 guard take(")") else { throw ScratchError.message("Missing parenthesis") }
+            }
+            if let function = functions[token] {
+                guard arguments.count == function.parameters.count, arguments.allSatisfy(\.isFinite), callDepth < 16 else {
+                    throw ScratchError.message("Invalid function call")
+                }
+                var local = variables
+                for (parameter, value) in zip(function.parameters, arguments) { local[parameter] = value }
+                var parser = MathParser(function.expression, variables: local, functions: functions)
+                parser.callDepth = callDepth + 1; parser.budget = budget
+                let value = try parser.evaluate()
+                if start == 0, position == tokens.count {
+                    explanation = function.substitution(arguments)
+                }
+                return value
             }
             return try Self.call(token.lowercased(), arguments: arguments)
         }
@@ -372,7 +457,9 @@ struct MathParser {
             guard arguments.count == count else { throw ScratchError.message("Wrong number of arguments") }
         }
         let value: Double
-        if ["min", "max"].contains(name) {
+        if CourseMath.names.contains(name) {
+            value = try CourseMath.evaluate(name, arguments)
+        } else if ["min", "max"].contains(name) {
             guard !arguments.isEmpty else { throw ScratchError.message("Missing argument") }
             value = name == "min" ? arguments.min()! : arguments.max()!
         } else if ["pow", "atan2", "hypot", "log"].contains(name), arguments.count == 2 {

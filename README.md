@@ -21,7 +21,24 @@ Start a note with `list`, `math`, `sum`, `average`, `count` or `code`, optionall
 
 Checklists accept `[]`, `[ ]`, `[x]`, `- [ ]` and `- [x]`; typing the closing `]` at the start of a line adds the space, so the item stays a checkbox. Choosing a command from the slash popup runs it. Click the checkbox to toggle. List notes keep their first line as the title. Plain nonempty body lines receive implicit checkboxes; numbered/bulleted rows, headings and `//` comments do not. Type `/x` at the end of an item to check or uncheck it; the trigger disappears. Item text and checkbox positions stay stable during ordinary typing. Markdown bullet and numbered markers also continue on Return; a blank item exits the list. Tab/Shift-Tab indent/outdent. Plain text stays the source of truth. Headings, bold, italic, underline, strikethrough and comments get subtle native styling. **⌘B / ⌘I / ⌘U** wrap selected text. Code notes use a monospaced font and preserve pasted indentation. HTTP(S) links are clickable; **⌘Return** opens the link under the caret through Vehla.
 
-Math supports arithmetic, parentheses, right-associative powers, percentages (`100 + 15% =`, `50% of 200 =`) and variables (`x = pi / 4`, then `sin(x)^2 + cos(x)^2 =`). End an expression with `=`; results appear inline beside each expression without modifying your text. Answers follow the last visual line when an expression wraps, and the last answers stay visible until recalculation completes. Variables carry across math sections in document order; changing an earlier variable recalculates later expressions. Use explicit multiplication, such as `2 * sin(x)`.
+Math supports arithmetic, parentheses, right-associative powers, percentages (`100 + 15% =`, `50% of 200 =`) and variables (`x = pi / 4`, then `sin(x)^2 + cos(x)^2 =`). End an expression with `=`; results appear inline beside each expression without modifying your text. Answers follow the last visual line when an expression wraps, and the last answers stay visible until recalculation completes. Variables carry across math sections in document order; changing an earlier variable recalculates later expressions. Multiplication accepts `2 * sin(x)` and implicit forms such as `5x`, `2sin(x)` and `3(x + 1)`; multiplication and division have equal precedence and evaluate left to right.
+
+Define your own numeric functions in a math section:
+
+```text
+math: Function notation
+f(x) = 5x - 2
+f(1) =
+f(2) =
+f(3) =
+f(4) =
+f(5) =
+f(6) =
+```
+
+Each call shows the substituted rule and output inline (hover an answer to read the complete details), for example `5(4) - 2 = 18`. Repeating calls creates an input/output list like a function table. Functions support multiple parameters (`area(w, h) = w*h`), scientific functions (`wave(x) = sin(x)`) and other user functions (`g(x) = f(x)^2`). Parameters are local to the call; other variables use their current value at the calling line. Definitions and redefinitions apply to later math lines, including later sections, and recalculate when earlier text changes. Names are case-sensitive; built-in scientific functions cannot be redefined. Use 1–16 distinct parameters. Up to 64 function definitions are retained per note analysis; calls are bounded to 16 nested user calls and a shared calculation work limit. Function rules are evaluated numerically when called; invalid rules and recursive cycles report “Check expression” at the call. Definitions remain plain note text, so they persist and export normally.
+
+Choose **More → Math 108X Examples** to create an editable example note for fractions/budgets, function tables, statistics, savings/loans, quadratic features, systems, trendlines, or probability/logic. These examples are opt-in and work in existing libraries. See the [course equation guide](docs/MATH_108X.md) for every helper, argument order, formulas, and textbook sources.
 
 Scientific functions and constants:
 
@@ -33,7 +50,7 @@ Scientific functions and constants:
 
 Calls can nest: `sqrt(pow(3, 2) + pow(4, 2)) =`, `log(81, 3) =`, `exp(ln(5)) =`. Commas separate arguments; use ungrouped numbers inside parentheses, such as `max(1200, 1500)`. Outside parentheses, grouped thousands such as `1,200 + 300 =` remain supported. Scientific notation (`1e-3`) also works. This evaluates numeric expressions, including assigned variables; it does not solve symbolic equations or support complex numbers. Unknown functions/variables, incorrect argument counts, invalid domains and non-finite results show “Check expression”. Calculations use floating-point precision and answers display up to six decimal places.
 
-`//` comments are ignored. Supported unit conversions use `10 km to mi =`: m/cm/mm/km/in/ft/yd/mi, g/kg/lb/oz, ml/l/gal (US), s/min/h, and C/F. Currency exchange and arbitrary prose math are not implemented. Sum/average extract numbers from non-comment lines. Count reports words, characters and lines.
+`//` comments are ignored. Supported unit conversions use `10 km to mi =`: m/cm/mm/km/in/ft/yd/mi, g/kg/lb/oz, ml/l/gal (US), s/min/h, C/F, and m/s/km/h/mph/ft/s. Currency exchange and arbitrary prose math are not implemented. Sum/average extract numbers from non-comment lines. Count reports words, characters and lines.
 
 Type `paste` on a line and press Return to start **AutoPaste**. `paste( | )` uses a custom separator. Copies append through Vehla's canonical clipboard history, with a plain-text pasteboard fallback on older hosts. Capture is opt-in and stops on Escape, changing notes, hiding or closing the widget. Paste/drop an image for local macOS Vision OCR. Image file reading and recognition run off MainActor; images are not stored or uploaded.
 
@@ -67,7 +84,7 @@ swift run --package-path sdk/swift vehla-swift validate extensions/quicknote-doc
 
 On this machine, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` is needed for tests because the selected Command Line Tools installation lacks complete test plugins. The release build uses the native SwiftPM backend, matching the Research widget.
 
-Install `dist/QuickNote` through **Vehla Settings → Store → Install Local Package**, then enable the widget in **Dock Widgets**. Reinstall after rebuilding: Vehla uses its installed copy. Quit and reopen Vehla after updating a previously loaded native bundle; in-process modules remain loaded until the host exits. If both Vehla and Vehla Alpha are running, restart both. A stale loaded descriptor can produce a metadata mismatch even when the installed manifest and binary match. The build produces an arm64, ad-hoc signed bundle linked to Vehla's embedded SDK framework. Historical signed 1.1.1 archives are retained; 2.1.3 is submitted for source review. Catalog publication requires an immutable 2.1.3 archive signed with the existing publisher identity; the retained 1.1.1 release is not a substitute for this build.
+Install `dist/QuickNote` through **Vehla Settings → Store → Install Local Package**, then enable the widget in **Dock Widgets**. Reinstall after rebuilding: Vehla uses its installed copy. Quit and reopen Vehla after updating a previously loaded native bundle; in-process modules remain loaded until the host exits. If both Vehla and Vehla Alpha are running, restart both. A stale loaded descriptor can produce a metadata mismatch even when the installed manifest and binary match. The build produces an arm64, ad-hoc signed bundle linked to Vehla's embedded SDK framework. Historical signed 1.1.1 archives are retained; 2.1.4 is submitted for source review. Catalog publication requires an immutable 2.1.4 archive signed with the existing publisher identity; the retained 1.1.1 release is not a substitute for this build.
 
 See [architecture and research notes](docs/ARCHITECTURE.md) for inspected sources, SDK contracts and design decisions. Tests cover database compatibility, persistence/recovery, absent Antinote, import idempotency, slot/expiry safety, math/search, native list editing, host bridge use, close-time saves and offscreen rendering. Actual popup routing and file-panel behavior still need checking in an installed Vehla build.
 
