@@ -10,12 +10,12 @@ struct QuickNoteRootView: View {
         switch surface {
         case .compact:
             VStack(spacing: 3) {
-                Image(systemName: "note.text").font(.system(size: 18, weight: .semibold))
+                Image(systemName: model.autoPaste ? "clipboard.fill" : "note.text").font(.system(size: 18, weight: .semibold))
                 Text(model.notes.isEmpty ? "Notes" : "\(model.notes.count)").font(.system(size: 9, weight: .semibold))
             }
             .foregroundStyle(Color(nsColor: model.tileTextColor))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .help(model.selected?.title ?? "Your scratchpad")
+            .help(model.autoPaste ? "AutoPaste is collecting copies into \(model.selected?.title ?? "a note")" : model.selected?.title ?? "Your scratchpad")
         case .inline:
             HStack(spacing: 8) {
                 Image(systemName: "note.text")
@@ -71,7 +71,6 @@ private struct PopupNoteView: View {
         .confirmationDialog("Recover the previous saved library?", isPresented: $model.recoverPresented) {
             Button("Recover Previous Save") { model.recover() }
         } message: { Text("The previous library replaces the current one. Export a backup first if you want to keep both.") }
-        .onDisappear { model.stopCapture() }
         .onChange(of: model.searchFocusRequest) { searchFocused = true }
     }
 
@@ -102,7 +101,11 @@ private struct PopupNoteView: View {
                 Button("Export Library Backup…") { model.export(backup: true) }.disabled(!model.ready)
                 Button("Send to Vehla Notes") { model.sendToNotes() }.disabled(model.context?.app == nil || model.selected == nil)
                 Divider()
+                Button("Open Note in Window") { model.popOut() }.keyboardShortcut("o", modifiers: [.command, .shift])
+                    .disabled(model.selected == nil || model.selected?.deleted != nil)
                 Button("Swap Stack / Slots") { _ = model.perform(shortcut: "swap") }.keyboardShortcut("t", modifiers: .command)
+                Button(model.autoPaste ? "Stop AutoPaste" : "Start AutoPaste") { _ = model.command("/paste") }
+                    .disabled(!model.autoPaste && (model.selected == nil || model.selected?.deleted != nil))
                 Button("Find and Replace") { _ = model.perform(shortcut: "find") }.keyboardShortcut("f", modifiers: [.command, .shift])
                     .disabled(model.selected == nil || model.selected?.deleted != nil)
                 Button("Promote to Front") { model.promote() }.keyboardShortcut("1", modifiers: [.command, .shift])
@@ -163,7 +166,8 @@ private struct PopupNoteView: View {
                         }.buttonStyle(.plain)
                             .contextMenu {
                                 if note.deleted != nil { Button("Restore") { model.restore(note.id) } }
-                                else if note.slot == nil {
+                                else { Button("Open in Window") { model.popOut(note.id) } }
+                                if note.deleted == nil, note.slot == nil {
                                     Button("Promote to Front") { model.promote(note.id) }
                                     Button("Move to The Void") { model.trash(note.id) }
                                 }
@@ -204,7 +208,11 @@ private struct PopupNoteView: View {
                         .font(.system(size: 9, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(primary)
                     Spacer()
                     if model.selected?.deleted != nil { Button("Restore Note") { if let id = model.selectedID { model.restore(id) } } }
-                    else { slotMenu }
+                    else {
+                        Button { model.popOut() } label: { Image(systemName: "macwindow.on.rectangle").font(.system(size: 11)) }
+                            .buttonStyle(.borderless).help("Open in its own window (⌘⇧O)")
+                        slotMenu
+                    }
                 }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 8)
                 if model.selected?.deleted != nil {
                     ScrollView { Text(model.draft).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(24) }
@@ -214,20 +222,10 @@ private struct PopupNoteView: View {
                                      fontSize: model.library.fontSize, focusToken: model.focusToken,
                                      analysis: model.analysis,
                                      onCommand: model.command, onShortcut: model.perform(shortcut:), onNavigate: model.navigate, onEscape: model.escape,
-                                     onImage: model.recognizeImage, onImageFile: model.recognizeFile,
+                                     onImage: { model.recognizeImage($0) }, onImageFile: { model.recognizeFile($0) },
                                      onOpenURL: { model.context?.open($0) })
                     .padding(.horizontal, 18).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background {
-                        if model.library.linedPaper {
-                            Canvas { context, size in
-                                var path = Path()
-                                for y in stride(from: 28.0, to: size.height, by: model.library.fontSize * 1.5) {
-                                    path.move(to: CGPoint(x: 24, y: y)); path.addLine(to: CGPoint(x: size.width - 24, y: y))
-                                }
-                                context.stroke(path, with: .color(secondary.opacity(0.1)), lineWidth: 0.5)
-                            }
-                        }
-                    }
+                    .background { if model.library.linedPaper { LinedPaper(fontSize: model.library.fontSize, color: secondary) } }
                     .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
                         guard let provider = providers.first else { return false }
                         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -303,6 +301,20 @@ private struct PopupNoteView: View {
                     .help("Position in your notes; ⌘[ and ⌘] turn the page")
             }
         }.buttonStyle(.borderless).font(.system(size: 11)).padding(.horizontal, 16).padding(.vertical, 10)
+    }
+}
+
+struct LinedPaper: View {
+    let fontSize: Double
+    let color: Color
+    var body: some View {
+        Canvas { context, size in
+            var path = Path()
+            for y in stride(from: 28.0, to: size.height, by: fontSize * 1.5) {
+                path.move(to: CGPoint(x: 24, y: y)); path.addLine(to: CGPoint(x: size.width - 24, y: y))
+            }
+            context.stroke(path, with: .color(color.opacity(0.1)), lineWidth: 0.5)
+        }
     }
 }
 

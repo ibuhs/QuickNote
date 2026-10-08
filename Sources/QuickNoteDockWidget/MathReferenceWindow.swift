@@ -9,49 +9,17 @@ final class MathReferenceWindow {
 
     func show(model: QuickNoteModel) {
         if let panel { panel.orderFront(nil); return }
-        let panel = ReferencePanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
-                                   styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
-                                   backing: .buffered, defer: false)
-        panel.title = "QuickNote — Math Reference"
-        panel.isReleasedWhenClosed = false
-        panel.hidesOnDeactivate = false
-        panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.minSize = NSSize(width: 380, height: 340)
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        let material = NSVisualEffectView()
-        material.material = .popover
-        material.blendingMode = .behindWindow
-        material.state = .active
-        let host = TransparentHostingView(rootView: MathReferenceView(model: model))
-        host.sizingOptions = []
-        host.translatesAutoresizingMaskIntoConstraints = false
-        material.addSubview(host)
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: material.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: material.trailingAnchor),
-            host.topAnchor.constraint(equalTo: material.topAnchor),
-            host.bottomAnchor.constraint(equalTo: material.bottomAnchor),
-        ])
-        panel.contentView = material
-        panel.center()
-        // Place beside the editor where the screen permits; no focus is taken
-        // from its text view just to open the guide.
-        if let editor = NSApp.keyWindow, let screen = editor.screen {
-            let bounds = screen.visibleFrame
-            let right = editor.frame.maxX + 12
-            let x = right + panel.frame.width <= bounds.maxX ? right : editor.frame.minX - panel.frame.width - 12
-            panel.setFrameOrigin(NSPoint(x: min(max(x, bounds.minX), bounds.maxX - panel.frame.width),
-                                         y: min(max(editor.frame.maxY - panel.frame.height, bounds.minY), bounds.maxY - panel.frame.height)))
-        }
+        let panel = QuickNotePanel.make(title: "QuickNote — Math Reference", size: NSSize(width: 480, height: 640),
+                                        minSize: NSSize(width: 380, height: 340), content: MathReferenceView(model: model))
+        // No focus is taken from the editor's text view just to open the guide.
+        QuickNotePanel.placeBesideKeyWindow(panel)
         self.panel = panel
         updateAppearance(isDark: model.theme?.isDark)
         panel.orderFront(nil)
     }
 
     func updateAppearance(isDark: Bool?) {
-        panel?.appearance = isDark.map { NSAppearance(named: $0 ? .darkAqua : .aqua) } ?? nil
+        panel?.appearance = QuickNotePanel.appearance(isDark: isDark)
     }
 
     func close() {
@@ -59,12 +27,6 @@ final class MathReferenceWindow {
         panel?.contentView = nil
         panel = nil
     }
-}
-
-@MainActor
-private final class ReferencePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
 }
 
 private struct MathReferenceView: View {
@@ -105,6 +67,5 @@ private struct MathReferenceView: View {
         }
         .foregroundStyle(primary).padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: model.theme?.isDark) { model.mathReference.updateAppearance(isDark: $1) }
     }
 }

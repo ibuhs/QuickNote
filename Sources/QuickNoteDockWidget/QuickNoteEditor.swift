@@ -766,6 +766,8 @@ final class InlineTextView: NSTextView {
         case "s": return onShortcut("export")
         case "d": return onShortcut("void")
         case "t": return onShortcut("swap")
+        case "o" where shift: return onShortcut("popout")
+        case "w": return onShortcut("close")
         case "=", "+": return onShortcut("bigger")
         case "-": return onShortcut("smaller")
         case "[": onNavigate(1)
@@ -1127,7 +1129,7 @@ final class NoteScrollView: NSScrollView {
 
     override func swipe(with event: NSEvent) {
         if abs(event.deltaX) > abs(event.deltaY), event.deltaX != 0 {
-            onNavigate(event.deltaX > 0 ? 1 : -1)
+            onNavigate(event.deltaX > 0 ? -1 : 1)
         } else { super.swipe(with: event) }
     }
 
@@ -1169,8 +1171,9 @@ struct NoteSwipeTracker {
         }
         if phase.contains(.ended) {
             tracking = false
+            // Swiping left goes to the older note (direction 1), right to the newer one.
             if axis == .horizontal, abs(distanceX) >= 120 {
-                return .navigate(distanceX > 0 ? 1 : -1)
+                return .navigate(distanceX > 0 ? -1 : 1)
             }
         }
         return axis == .horizontal ? .consume : .passThrough
